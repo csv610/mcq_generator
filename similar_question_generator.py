@@ -1,5 +1,5 @@
+import litellm
 from prompt_builder import PromptBuilder
-from llm_model import LLMModel, OpenAIModel
 
 class SimilarQuestionGenerator:
     def __init__(self, model):
@@ -7,18 +7,20 @@ class SimilarQuestionGenerator:
         self.prompt_builder = PromptBuilder()
 
     def generate_similar_question(self, question, options=None):
-        if options is None:
-           self.prompt_builder.build_generate_similar_question_prompt(question)
-        else:
-           self.prompt_builder.build_generate_similar_question_prompt_with_options(question, options)
-
-     
-        response = self.model.get_response([{"role": "user", "content": prompt}])
-        return response['choices'][0]['message']['content']
+        with_options = options is not None
+        prompt = self.prompt_builder.get_similar_question_generation_prompt(question, with_options=with_options)
+        try:
+            response = litellm.completion(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.choices[0].message.content
+        except Exception:
+            return ""
 
 if __name__ == "__main__":
     # Example usage with options
-    model = YourModelClass()  # Replace with your actual model class
+    model = "openai/gpt-4o-mini"
     generator = SimilarQuestionGenerator(model)
     question = "What are the benefits of exercise?"
     options = ["A) Weight loss", "B) Improved mood", "C) Increased energy", "D) All of the above"]

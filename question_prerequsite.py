@@ -1,13 +1,13 @@
+import litellm
 from prompt_builder import PromptBuilder
-from llm_model import LLMModel, OpenAIModel 
 
 class QuestionPrerequisite:
-    def __init__(self, model: LLMModel):
+    def __init__(self, model: str):
         """
         Initializes the QuestionPrerequisite with a specified model.
 
         Args:
-            model: An instance of a language model (e.g., OpenAIModel).
+            model: Model name string (e.g., "openai/gpt-4o-mini").
         """
         self.model = model
         self.prompt_builder = PromptBuilder()
@@ -31,25 +31,24 @@ class QuestionPrerequisite:
             prompt = self.prompt_builder.get_prerequisites_prompt(question, options)
         except Exception as e:
             raise RuntimeError(f"Failed to generate prompt: {e}")
-        
+
         try:
-            response = self.model.get_response([{"role": "user", "content": prompt}])
+            response = litellm.completion(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            content = response.choices[0].message.content
+            message_contents = content.strip().split("\n\n")
         except Exception as e:
             raise RuntimeError(f"Failed to get response from model: {e}")
-        
-        # Improved error handling for response
-        if not isinstance(response, list) or not all(isinstance(msg, str) for msg in response):
-            raise ValueError("Expected response to be a list of strings.")
-        
-        message_contents = response  # Directly assign if it's a list
 
         return message_contents  # Return the message contents
 
 if __name__ == "__main__":
-    model = OpenAIModel()
+    model = "openai/gpt-4o-mini"
     question_prerequisite = QuestionPrerequisite(model)
-    
+
     question = "What is the unit of force?"
-    options = ["A) Joule", "B) Newton", "C) Pascal", "D) Watt"] 
+    options = ["A) Joule", "B) Newton", "C) Pascal", "D) Watt"]
     response = question_prerequisite.question_prerequisites(question, options)
     print(response)

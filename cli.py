@@ -7,14 +7,15 @@ import argparse
 import json
 import logging
 import sys
+import os
 from pathlib import Path
 from typing import List, Dict
 from datetime import datetime
+import litellm
 from question_generator import QuestionGenerator
 from question_translator import QuestionTranslator
 from question_prerequsite import QuestionPrerequisite
 from similar_question_generator import SimilarQuestionGenerator
-from llm_model import OpenAIModel, LiteLLMModel
 
 # Configure logging
 logging.basicConfig(
@@ -37,12 +38,14 @@ class MCQGeneratorCLI:
     def set_model(self, provider: str, model_name: str):
         """Initialize the LLM model based on provider"""
         try:
+            # Store provider and model for later use with LiteLLM
+            self.provider = provider
+            self.model_name = model_name
+            # For OpenAI, prepend 'openai/' to model name if not already present
             if provider.lower() == "openai":
-                self.model = OpenAIModel(model_name)
-            elif provider.lower() in ["perplexity", "claude"]:
-                self.model = LiteLLMModel(model_name)
+                self.model = f"openai/{model_name}" if not model_name.startswith("openai/") else model_name
             else:
-                self.model = LiteLLMModel(model_name)
+                self.model = f"{provider}/{model_name}" if "/" not in model_name else model_name
 
             print(f"✓ Model '{model_name}' initialized ({provider})")
             logger.info(f"Model initialized: {provider} - {model_name}")
@@ -221,20 +224,21 @@ def cmd_explain(args, cli_app):
 
         print(f"\n📖 Generating explanation for Question {args.question_num}...\n")
 
-        response = cli_app.model.get_response(
-            messages=[
-                {"role": "system", "content": "You are an expert assistant providing detailed explanations for multiple-choice questions."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=args.max_tokens,
-            temperature=0.7
-        )
-
-        if response:
-            explanation = response[0] if isinstance(response, list) else response
+        try:
+            response = litellm.completion(
+                model=cli_app.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert assistant providing detailed explanations for multiple-choice questions."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=args.max_tokens,
+                temperature=0.7
+            )
+            explanation = response.choices[0].message.content
             print(f"{explanation}\n")
-        else:
-            print("Unable to generate explanation.")
+        except Exception as e:
+            logger.error(f"Error generating explanation: {e}")
+            print(f"Unable to generate explanation: {e}")
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

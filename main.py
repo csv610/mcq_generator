@@ -2,9 +2,9 @@ import streamlit as st
 import json
 from question_generator import QuestionGenerator
 from question_translator import QuestionTranslator
-from question_prerequisite import QuestionPrerequisite
+from question_prerequsite import QuestionPrerequisite
 from similar_question_generator import SimilarQuestionGenerator
-from llm_model import OpenAIModel
+from prompt_builder import PromptBuilder
 import logging
 
 # Initialize logging
@@ -19,9 +19,21 @@ def save_to_json_in_english(filename, questions):
 def main():
     st.sidebar.title("MCQ Generator")
 
-    # Model selection
-    model_name = st.sidebar.selectbox("Select Model", ["gpt-4o-mini", "gpt-4o", "gpt-4"])
-    model = OpenAIModel(model_name)
+    # Provider and Model selection
+    provider = st.sidebar.selectbox("Select Provider", ["OpenAI", "Claude (Anthropic)", "Perplexity", "Other LiteLLM"])
+
+    if provider == "OpenAI":
+        model_name = st.sidebar.selectbox("Select OpenAI Model", ["gpt-4o-mini", "gpt-4o", "gpt-4"])
+        model = f"openai/{model_name}"
+    elif provider == "Claude (Anthropic)":
+        model_name = st.sidebar.selectbox("Select Claude Model", ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"])
+        model = f"claude/{model_name}"
+    elif provider == "Perplexity":
+        model_name = st.sidebar.selectbox("Select Perplexity Model", ["sonar", "sonar-pro"])
+        model = f"perplexity/{model_name}"
+    else:
+        model_name = st.sidebar.text_input("Enter LiteLLM Model Name", value="openai/gpt-4o-mini", help="e.g., ollama/llama2, cohere/command, etc.")
+        model = model_name if model_name else None
 
     language = st.sidebar.selectbox("Select Language", ["English", "Hindi"])
     
@@ -40,7 +52,9 @@ def main():
 
     # Generate Questions
     if st.sidebar.button("Generate Questions"):
-        if not specialization or not difficulty or not language:
+        if not model:
+            st.sidebar.error("Please select a valid model.")
+        elif not specialization or not difficulty or not language:
             st.sidebar.error("Please fill out all fields.")
         else:
             # Initialize or increment the index for the specialization
@@ -124,36 +138,44 @@ def main():
                 # Explain Answer
                 if st.button(f"Explain Answer for Question {i}"):
                     with st.spinner(f"Explaining answer for Question {i}..."):
-                        prompt_builder = PromptBuilder()
-                        prompt_builder.build_explain_answer_prompt(q["question"], q["correct_answer"], q["options"])
-                        prompt = prompt_builder.get_prompt("explain_answer")
+                        if model:
+                            prompt_builder = PromptBuilder()
+                            prompt = prompt_builder.get_explain_answer_prompt(q["question"], q["options"], q["correct_answer"])
 
-                        response = model.get_response(
-                            messages=[
-                                {"role": "system", "content": "You are an expert assistant providing detailed explanations for multiple-choice questions."},
-                                {"role": "user", "content": prompt}
-                            ],
-                            max_tokens=max_tokens_explanation,
-                            temperature=0.7,
-                        )
-                        explanation = response['choices'][0]['message']['content'].strip()
+                            response = model.get_response(
+                                messages=[
+                                    {"role": "system", "content": "You are an expert assistant providing detailed explanations for multiple-choice questions."},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                max_tokens=max_tokens_explanation,
+                                temperature=0.7,
+                            )
+                            explanation = response[0] if response else "Unable to generate explanation."
 
-                        # Display explanation
-                        st.write(explanation)
+                            # Display explanation
+                            st.write(explanation)
+                        else:
+                            st.error("Please select a valid model.")
 
                 # Prerequisite Background Material
                 if st.button(f"Prerequisite for Question {i}"):
                     with st.spinner(f"Fetching prerequisite material for Question {i}..."):
-                        question_prerequisite = QuestionPrerequisite(model)
-                        prerequisite_material = question_prerequisite.fetch_prerequisite(q["question"], q["options"])
-                        st.write(prerequisite_material)
+                        if model:
+                            question_prerequisite = QuestionPrerequisite(model)
+                            prerequisite_material = question_prerequisite.fetch_prerequisite(q["question"], q["options"])
+                            st.write(prerequisite_material)
+                        else:
+                            st.error("Please select a valid model.")
 
                 # Generate Similar Question
                 if st.button(f"Generate Similar Question for Question {i}"):
                     with st.spinner(f"Generating similar question for Question {i}..."):
-                        similar_question_generator = SimilarQuestionGenerator(model)
-                        similar_question = similar_question_generator.generate_similar_question(q["question"])
-                        st.write(similar_question)
+                        if model:
+                            similar_question_generator = SimilarQuestionGenerator(model)
+                            similar_question = similar_question_generator.generate_similar_question(q["question"])
+                            st.write(similar_question)
+                        else:
+                            st.error("Please select a valid model.")
 
 if __name__ == "__main__":
     main()

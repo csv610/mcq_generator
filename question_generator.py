@@ -1,13 +1,13 @@
 import re
+import litellm
 from prompt_builder import PromptBuilder
-from llm_model import LLMModel, OpenAIModel 
 import logging
 
 # Configure logging to write to a file
 logging.basicConfig(filename='question_generator.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class QuestionGenerator:
-    def __init__(self, model: LLMModel):
+    def __init__(self, model: str):
         self.model = model
         self.prompt_builder = PromptBuilder()
 
@@ -32,20 +32,24 @@ class QuestionGenerator:
         logging.info("Generating questions with prompt: %s", prompt)
 
         try:
-            response = self.model.get_response([{"role": "user", "content": prompt}], max_tokens=max_tokens)
-            if not isinstance(response, list):
-                raise ValueError("Response is not a list")
+            response = litellm.completion(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens
+            )
+            content = response.choices[0].message.content
+            response_list = content.strip().split("\n\n")
         except Exception as e:
             logging.error("Error generating questions: %s", e)
             return []  # Return an empty list on error
-        
-        questions = [self.parse_question(choice) for choice in response if self.parse_question(choice)]
+
+        questions = [self.parse_question(choice) for choice in response_list if self.parse_question(choice)]
         logging.info("Generated %d questions", len(questions))
         return questions  # Return the list of questions
 
 if __name__ == "__main__":
     # Example usage
-    model = OpenAIModel() 
+    model = "openai/gpt-4o-mini"
     generator = QuestionGenerator(model)
     questions = generator.generate_questions("History", "Easy", 4, 1000)
     print(questions)
