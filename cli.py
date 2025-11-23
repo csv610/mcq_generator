@@ -85,7 +85,6 @@ class MCQGeneratorCLI:
             return
 
         for idx, q in enumerate(questions, 1):
-            print(f"\n{'='*70}")
             print(f"Question {idx}:")
             print(f"{q.get('question', 'N/A')}")
             print(f"\nOptions:")
@@ -101,8 +100,6 @@ class MCQGeneratorCLI:
 
             if show_answers:
                 print(f"\n✓ Correct Answer: {q.get('correct_answer', 'N/A')}")
-
-            print(f"{'='*70}")
 
     def save_questions(self, questions: List[Dict], specialization: str,
                       filename: str = None):
