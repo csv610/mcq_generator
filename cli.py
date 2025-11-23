@@ -39,6 +39,8 @@ class MCQGeneratorCLI:
         try:
             if provider.lower() == "openai":
                 self.model = OpenAIModel(model_name)
+            elif provider.lower() in ["perplexity", "claude"]:
+                self.model = LiteLLMModel(model_name)
             else:
                 self.model = LiteLLMModel(model_name)
 
@@ -358,8 +360,9 @@ def cmd_info(args, cli_app):
 ╚════════════════════════════════════════════════════════════════════╝
 
 QUICK START:
-  1. Initialize a model:
-     $ python cli.py init-model --provider openai --model gpt-4o-mini
+  1. Initialize a model (default: Perplexity Sonar):
+     $ python cli.py init-model
+     or: python cli.py init-model --provider openai --model gpt-4o-mini
 
   2. Generate questions:
      $ python cli.py generate --specialization "Python Programming" \\
@@ -406,13 +409,13 @@ Examples:
     # init-model command
     init_parser = subparsers.add_parser('init-model', help='Initialize the AI model')
     init_parser.add_argument('--provider',
-                            choices=['openai', 'claude', 'litellm'],
-                            default='openai',
-                            help='LLM provider (default: openai)')
+                            choices=['openai', 'claude', 'perplexity', 'litellm'],
+                            default='perplexity',
+                            help='LLM provider (default: perplexity)')
     init_parser.add_argument('--model',
                             type=str,
-                            default='gpt-4o-mini',
-                            help='Model name (default: gpt-4o-mini)')
+                            default='sonar',
+                            help='Model name (default: sonar)')
     init_parser.set_defaults(func=cmd_init_model)
 
     # generate command
