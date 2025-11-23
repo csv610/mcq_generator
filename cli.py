@@ -1,0 +1,523 @@
+#!/usr/bin/env python3
+"""
+MCQ Generator CLI - Generate multiple-choice questions from the command line
+"""
+
+import argparse
+import json
+import logging
+import sys
+from pathlib import Path
+from typing import List, Dict
+from datetime import datetime
+from question_generator import QuestionGenerator
+from question_translator import QuestionTranslator
+from question_prerequsite import QuestionPrerequisite
+from similar_question_generator import SimilarQuestionGenerator
+from llm_model import OpenAIModel, LiteLLMModel
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('mcq_cli.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+
+class MCQGeneratorCLI:
+    """Handles MCQ generation and management via CLI"""
+
+    def __init__(self):
+        self.model = None
+
+    def set_model(self, provider: str, model_name: str):
+        """Initialize the LLM model based on provider"""
+        try:
+            if provider.lower() == "openai":
+                self.model = OpenAIModel(model_name)
+            else:
+                self.model = LiteLLMModel(model_name)
+
+            print(f"✓ Model '{model_name}' initialized ({provider})")
+            logger.info(f"Model initialized: {provider} - {model_name}")
+        except Exception as e:
+            logger.error(f"Error initializing model: {e}")
+            raise Exception(f"Failed to initialize model: {e}")
+
+    def generate_questions(self, specialization: str, difficulty: str,
+                          num_questions: int, max_tokens: int) -> List[Dict]:
+        """Generate MCQ questions"""
+        if not self.model:
+            raise Exception("Model not initialized. Please set up a model first.")
+
+        try:
+            generator = QuestionGenerator(self.model)
+            print(f"\n📚 Generating {num_questions} {difficulty} questions on '{specialization}'...")
+
+            questions = generator.generate_questions(
+                specialization, difficulty, num_questions, max_tokens
+            )
+
+            if questions:
+                print(f"✓ Successfully generated {len(questions)} questions\n")
+                logger.info(f"Generated {len(questions)} questions for {specialization}")
+                return questions
+            else:
+                raise Exception("Failed to generate questions. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Error generating questions: {e}")
+            raise Exception(f"Error generating questions: {e}")
+
+    def display_questions(self, questions: List[Dict], show_answers: bool = False):
+        """Display questions in a formatted way"""
+        if not questions:
+            print("No questions to display.")
+            return
+
+        for idx, q in enumerate(questions, 1):
+            print(f"\n{'='*70}")
+            print(f"Question {idx}:")
+            print(f"{q.get('question', 'N/A')}")
+            print(f"\nOptions:")
+
+            options = q.get('options', {})
+            if isinstance(options, dict):
+                for key, option in options.items():
+                    print(f"  {key}. {option}")
+            else:
+                # Handle list format
+                for idx, option in enumerate(options, 1):
+                    print(f"  {chr(64+idx)}. {option}")
+
+            if show_answers:
+                print(f"\n✓ Correct Answer: {q.get('correct_answer', 'N/A')}")
+
+            print(f"{'='*70}")
+
+    def save_questions(self, questions: List[Dict], specialization: str,
+                      filename: str = None):
+        """Save questions to JSON file"""
+        if not questions:
+            raise Exception("No questions to save.")
+
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"mcq_{specialization}_{timestamp}.json"
+
+        try:
+            filepath = Path(filename)
+            data = {
+                "specialization": specialization,
+                "generated_at": datetime.now().isoformat(),
+                "question_count": len(questions),
+                "questions": questions
+            }
+
+            with open(filepath, 'w') as f:
+                json.dump(data, f, indent=2)
+
+            print(f"✓ Questions saved to '{filename}'")
+            logger.info(f"Questions saved to {filename}")
+
+        except Exception as e:
+            logger.error(f"Error saving questions: {e}")
+            raise Exception(f"Error saving questions: {e}")
+
+    def load_questions(self, filename: str) -> Dict:
+        """Load questions from JSON file"""
+        try:
+            filepath = Path(filename)
+            if not filepath.exists():
+                raise Exception(f"File '{filename}' not found.")
+
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+
+            print(f"✓ Loaded {len(data.get('questions', []))} questions from '{filename}'")
+            logger.info(f"Loaded questions from {filename}")
+            return data
+
+        except Exception as e:
+            logger.error(f"Error loading questions: {e}")
+            raise Exception(f"Error loading questions: {e}")
+
+
+def cmd_init_model(args, cli_app):
+    """Initialize the AI model"""
+    try:
+        cli_app.set_model(args.provider, args.model)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_generate(args, cli_app):
+    """Generate MCQ questions"""
+    try:
+        questions = cli_app.generate_questions(
+            args.specialization, args.difficulty.capitalize(), args.count, args.max_tokens
+        )
+        cli_app.display_questions(questions, show_answers=args.show_answers)
+
+        if args.save:
+            cli_app.save_questions(questions, args.specialization, args.save)
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_load(args, cli_app):
+    """Load and display questions from a JSON file"""
+    try:
+        data = cli_app.load_questions(args.filename)
+        questions = data.get('questions', [])
+        print(f"\nLoaded from: {args.filename}")
+        print(f"Specialization: {data.get('specialization', 'N/A')}")
+        print(f"Generated at: {data.get('generated_at', 'N/A')}\n")
+        cli_app.display_questions(questions, show_answers=args.show_answers)
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_explain(args, cli_app):
+    """Get detailed explanation for a specific question"""
+    try:
+        if not cli_app.model:
+            raise Exception("Model not initialized. Use 'init-model' command first.")
+
+        data = cli_app.load_questions(args.filename)
+        questions = data.get('questions', [])
+
+        if args.question_num < 1 or args.question_num > len(questions):
+            raise Exception(f"Invalid question number. Valid range: 1-{len(questions)}")
+
+        question = questions[args.question_num - 1]
+
+        from prompt_builder import PromptBuilder
+        prompt_builder = PromptBuilder()
+
+        # Handle both dict and list formats for options
+        options = question['options']
+        if isinstance(options, dict):
+            options_list = list(options.values())
+        else:
+            options_list = options
+
+        prompt = prompt_builder.get_explain_answer_prompt(
+            question['question'],
+            options_list,
+            question['correct_answer']
+        )
+
+        print(f"\n📖 Generating explanation for Question {args.question_num}...\n")
+
+        response = cli_app.model.get_response(
+            messages=[
+                {"role": "system", "content": "You are an expert assistant providing detailed explanations for multiple-choice questions."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=args.max_tokens,
+            temperature=0.7
+        )
+
+        if response:
+            explanation = response[0] if isinstance(response, list) else response
+            print(f"{explanation}\n")
+        else:
+            print("Unable to generate explanation.")
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_translate(args, cli_app):
+    """Translate questions to another language"""
+    try:
+        if not cli_app.model:
+            raise Exception("Model not initialized. Use 'init-model' command first.")
+
+        data = cli_app.load_questions(args.filename)
+        questions = data.get('questions', [])
+        translator = QuestionTranslator(cli_app.model)
+
+        print(f"\n🌐 Translating questions to {args.language.upper()}...\n")
+
+        translated_questions = []
+        for i, q in enumerate(questions, 1):
+            print(f"  Translating question {i}/{len(questions)}...", end='\r')
+            translated_q = q.copy()
+            translated_q['question'] = translator.translate_text(q['question'], args.language.capitalize())
+
+            # Handle both dict and list formats for options
+            options = q['options']
+            if isinstance(options, dict):
+                translated_q['options'] = {
+                    key: translator.translate_text(opt, args.language.capitalize())
+                    for key, opt in options.items()
+                }
+            else:
+                translated_q['options'] = [
+                    translator.translate_text(opt, args.language.capitalize())
+                    for opt in options
+                ]
+            translated_questions.append(translated_q)
+
+        print()  # New line after progress
+        cli_app.display_questions(translated_questions)
+
+        if args.save:
+            output_file = f"{Path(args.filename).stem}_{args.language}.json"
+            cli_app.save_questions(translated_questions, data.get('specialization', 'translated'), output_file)
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_prerequisites(args, cli_app):
+    """Get prerequisite knowledge for a question"""
+    try:
+        if not cli_app.model:
+            raise Exception("Model not initialized. Use 'init-model' command first.")
+
+        data = cli_app.load_questions(args.filename)
+        questions = data.get('questions', [])
+
+        if args.question_num < 1 or args.question_num > len(questions):
+            raise Exception(f"Invalid question number. Valid range: 1-{len(questions)}")
+
+        question = questions[args.question_num - 1]
+
+        print(f"\n📚 Fetching prerequisite knowledge for Question {args.question_num}...\n")
+
+        prereq_generator = QuestionPrerequisite(cli_app.model)
+
+        # Handle both dict and list formats for options
+        options = question['options']
+        if isinstance(options, dict):
+            options_list = list(options.values())
+        else:
+            options_list = options
+
+        prerequisites = prereq_generator.question_prerequisites(
+            question['question'],
+            options_list
+        )
+        prerequisite = '\n'.join(prerequisites) if isinstance(prerequisites, list) else prerequisites
+
+        print(f"{prerequisite}\n")
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_similar(args, cli_app):
+    """Generate a similar question based on an existing one"""
+    try:
+        if not cli_app.model:
+            raise Exception("Model not initialized. Use 'init-model' command first.")
+
+        data = cli_app.load_questions(args.filename)
+        questions = data.get('questions', [])
+
+        if args.question_num < 1 or args.question_num > len(questions):
+            raise Exception(f"Invalid question number. Valid range: 1-{len(questions)}")
+
+        question = questions[args.question_num - 1]
+
+        print(f"\n✨ Generating similar question based on Question {args.question_num}...\n")
+
+        similar_gen = SimilarQuestionGenerator(cli_app.model)
+        similar_question = similar_gen.generate_similar_question(question['question'])
+
+        print(f"{similar_question}\n")
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_info(args, cli_app):
+    """Display MCQ Generator CLI information"""
+    info_text = """
+╔════════════════════════════════════════════════════════════════════╗
+║                   MCQ Generator CLI v1.0.0                        ║
+║                                                                    ║
+║  Generate high-quality multiple choice questions using AI         ║
+║                                                                    ║
+╚════════════════════════════════════════════════════════════════════╝
+
+QUICK START:
+  1. Initialize a model:
+     $ python cli.py init-model --provider openai --model gpt-4o-mini
+
+  2. Generate questions:
+     $ python cli.py generate --specialization "Python Programming" \\
+       --difficulty medium --count 5
+
+  3. Load and view questions:
+     $ python cli.py load questions.json --show-answers
+
+  4. Get explanations:
+     $ python cli.py explain questions.json --question-num 1
+
+AVAILABLE COMMANDS:
+  • init-model      Initialize the AI model
+  • generate        Generate MCQ questions
+  • load            Load questions from file
+  • explain         Get explanation for a question
+  • translate       Translate questions to another language
+  • prerequisites   Get prerequisite knowledge
+  • similar         Generate similar question
+  • info            Show this information
+
+For more help: python cli.py COMMAND --help
+    """
+    print(info_text)
+
+
+def main():
+    """Main CLI entry point"""
+    parser = argparse.ArgumentParser(
+        prog='MCQ Generator CLI',
+        description='Generate high-quality multiple choice questions using AI',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python cli.py init-model --provider openai --model gpt-4o-mini
+  python cli.py generate --specialization "Python" --count 5
+  python cli.py load questions.json --show-answers
+  python cli.py explain questions.json --question-num 1
+        """
+    )
+
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+
+    # init-model command
+    init_parser = subparsers.add_parser('init-model', help='Initialize the AI model')
+    init_parser.add_argument('--provider',
+                            choices=['openai', 'claude', 'litellm'],
+                            default='openai',
+                            help='LLM provider (default: openai)')
+    init_parser.add_argument('--model',
+                            type=str,
+                            default='gpt-4o-mini',
+                            help='Model name (default: gpt-4o-mini)')
+    init_parser.set_defaults(func=cmd_init_model)
+
+    # generate command
+    gen_parser = subparsers.add_parser('generate', help='Generate MCQ questions')
+    gen_parser.add_argument('--specialization', '-s',
+                           type=str,
+                           required=True,
+                           help='Topic or subject for question generation')
+    gen_parser.add_argument('--difficulty', '-d',
+                           choices=['easy', 'medium', 'hard'],
+                           default='medium',
+                           help='Difficulty level (default: medium)')
+    gen_parser.add_argument('--count', '-c',
+                           type=int,
+                           default=5,
+                           help='Number of questions to generate (default: 5)')
+    gen_parser.add_argument('--max-tokens',
+                           type=int,
+                           default=3000,
+                           help='Maximum tokens for generation (default: 3000)')
+    gen_parser.add_argument('--save',
+                           type=str,
+                           help='Save questions to JSON file')
+    gen_parser.add_argument('--show-answers',
+                           action='store_true',
+                           help='Display correct answers')
+    gen_parser.set_defaults(func=cmd_generate)
+
+    # load command
+    load_parser = subparsers.add_parser('load', help='Load questions from file')
+    load_parser.add_argument('filename',
+                            type=str,
+                            help='JSON file containing questions')
+    load_parser.add_argument('--show-answers',
+                            action='store_true',
+                            help='Display correct answers')
+    load_parser.set_defaults(func=cmd_load)
+
+    # explain command
+    explain_parser = subparsers.add_parser('explain', help='Explain a question')
+    explain_parser.add_argument('filename',
+                               type=str,
+                               help='JSON file containing questions')
+    explain_parser.add_argument('--question-num', '-q',
+                               type=int,
+                               required=True,
+                               help='Question number to explain (1-based index)')
+    explain_parser.add_argument('--max-tokens',
+                               type=int,
+                               default=1500,
+                               help='Maximum tokens for explanation (default: 1500)')
+    explain_parser.set_defaults(func=cmd_explain)
+
+    # translate command
+    trans_parser = subparsers.add_parser('translate', help='Translate questions')
+    trans_parser.add_argument('filename',
+                             type=str,
+                             help='JSON file containing questions')
+    trans_parser.add_argument('--language', '-l',
+                             choices=['hindi', 'spanish', 'french'],
+                             default='hindi',
+                             help='Target language (default: hindi)')
+    trans_parser.add_argument('--save',
+                             action='store_true',
+                             help='Save translated questions')
+    trans_parser.set_defaults(func=cmd_translate)
+
+    # prerequisites command
+    prereq_parser = subparsers.add_parser('prerequisites', help='Get prerequisite knowledge')
+    prereq_parser.add_argument('filename',
+                              type=str,
+                              help='JSON file containing questions')
+    prereq_parser.add_argument('--question-num', '-q',
+                              type=int,
+                              required=True,
+                              help='Question number (1-based index)')
+    prereq_parser.set_defaults(func=cmd_prerequisites)
+
+    # similar command
+    sim_parser = subparsers.add_parser('similar', help='Generate similar question')
+    sim_parser.add_argument('filename',
+                           type=str,
+                           help='JSON file containing questions')
+    sim_parser.add_argument('--question-num', '-q',
+                           type=int,
+                           required=True,
+                           help='Question number to use as reference (1-based index)')
+    sim_parser.set_defaults(func=cmd_similar)
+
+    # info command
+    info_parser = subparsers.add_parser('info', help='Show information')
+    info_parser.set_defaults(func=cmd_info)
+
+    args = parser.parse_args()
+
+    # Initialize CLI
+    cli_app = MCQGeneratorCLI()
+
+    # Execute command
+    if hasattr(args, 'func'):
+        args.func(args, cli_app)
+    else:
+        parser.print_help()
+        sys.exit(0)
+
+
+if __name__ == '__main__':
+    main()
