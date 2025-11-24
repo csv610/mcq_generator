@@ -8,16 +8,32 @@ and multiple correct answers.
 
 import re
 import logging
+from dataclasses import dataclass
 import litellm
+from tqdm import tqdm
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from prompt_builder import PromptBuilder
 
 # Configure logging for this module
 logger = logging.getLogger(__name__)
 if not logger.handlers:
-    handler = logging.FileHandler('mcq_generate.log')
-    handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    handler = logging.FileHandler("mcq_generate.log")
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
+
+
+@dataclass
+class QuestionConfig:
+    """Configuration for MCQ question generation."""
+
+    field: str
+    difficulty: str
+    num_questions: int
+    num_options: int
+    num_correct_answers: int = 1
+    max_tokens: int = 3000
+    subfield: str = None
 
 
 class QuestionGenerator:
@@ -50,9 +66,11 @@ class QuestionGenerator:
         option_letters = [chr(65 + i) for i in range(num_options)]  # A, B, C, D, E, ...
 
         # Build pattern to extract question and options
-        option_pattern_parts = [f"{letter}\\.\\s*(.+?)(?=\\n[A-Z]\\.|\\nCorrect Answer:|$)" for letter in option_letters]
-        option_pattern = r'\s*'.join(option_pattern_parts)
-        pattern = f'Question:\\s*(.+?)\\n{option_pattern}\\s*Correct Answer:\\s*([^\n]+)'
+        option_pattern_parts = [
+            f"{letter}\\.\\s*(.+?)(?=\\n[A-Z]\\.|\\nCorrect Answer:|$)" for letter in option_letters
+        ]
+        option_pattern = r"\s*".join(option_pattern_parts)
+        pattern = f"Question:\\s*(.+?)\\n{option_pattern}\\s*Correct Answer:\\s*([^\n]+)"
 
         match = re.search(pattern, response_text, re.DOTALL)
         if match:
@@ -66,15 +84,16 @@ class QuestionGenerator:
             # Extract the correct answer, handling the line ending
             correct_answer_str = match.group(len(option_letters) + 2).strip()
             # Remove anything after the first newline (like rationale or source)
-            correct_answer_str = correct_answer_str.split('\n')[0].strip()
+            correct_answer_str = correct_answer_str.split("\n")[0].strip()
 
-            # Parse multiple answers: could be "A", "A and B", "A, B, C", "All of the Above", "None of the Above"
+            # Parse multiple answers: "A", "A and B", "A, B, C", "All of the Above",
+            # "None of the Above"
             correct_answers = self._parse_correct_answers(correct_answer_str)
 
             return {
                 "question": match.group(1).strip(),
                 "options": options,
-                "correct_answer": correct_answers
+                "correct_answer": correct_answers,
             }
         return {}
 
@@ -98,15 +117,47 @@ class QuestionGenerator:
         if answer_str.lower() in ["none of the above", "none of above"]:
             return ["None of the Above"]
 
-        answers = re.split(r'\s+and\s+|,\s*', answer_str)
+        answers = re.split(r"\s+and\s+|,\s*", answer_str)
         return [ans.strip().upper() for ans in answers if ans.strip()]
 
-    def generate_questions(self, field: str, difficulty: str, num_questions: int,
-                          max_tokens: int, num_options: int, num_correct_answers: int = 1) -> list:
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(Exception),
+        reraise=True,
+    )
+
+    def _call_llm(self, prompt: str, max_tokens: int) -> str:
+        """Call LLM API with retry logic.
+
+        Args:
+            prompt: The prompt to send to the LLM
+            max_tokens: Maximum tokens for LLM response
+
+        Returns:
+            The LLM response content
+
+        Raises:
+            Exception: If LLM call fails after retries
+        """
+        response = litellm.completion(
+            model=self.model, messages=[{"role": "user", "content": prompt}], max_tokens=max_tokens
+        )
+        return response.choices[0].message.content
+
+    def generate_questions(
+        self,
+        field: str,
+        difficulty: str,
+        num_questions: int,
+        max_tokens: int,
+        num_options: int,
+        num_correct_answers: int = 1,
+    ) -> list:
         """Generate MCQ questions using LLM.
 
         Calls LiteLLM API with a formatted prompt, parses the response, and returns
-        structured question data. Handles API errors gracefully.
+        structured question data. Includes retry logic for transient failures.
 
         Args:
             field: Subject field for question generation
@@ -118,7 +169,7 @@ class QuestionGenerator:
 
         Returns:
             List of question dictionaries with 'question', 'options', and 'correct_answer' keys.
-            Returns empty list if generation fails.
+            Returns empty list if generation fails after retries.
         """
         prompt = self.prompt_builder.get_mcq_generation_prompt(
             field, difficulty, num_questions, num_options, num_correct_answers
@@ -126,24 +177,23 @@ class QuestionGenerator:
         logger.info("Generating questions with prompt: %s", prompt)
 
         try:
-            response = litellm.completion(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens
-            )
-            content = response.choices[0].message.content
+            content = self._call_llm(prompt, max_tokens)
             response_list = content.strip().split("\n\n")
         except Exception as e:
-            logger.error("Error generating questions: %s", e)
+            logger.error("Error generating questions after retries: %s", e)
             return []  # Return an empty list on error
 
-        questions = [
-            self.parse_question(choice, num_options)
-            for choice in response_list
-            if self.parse_question(choice, num_options)
-        ]
+        questions = []
+        with tqdm(total=len(response_list), desc="Parsing questions", unit="q") as pbar:
+            for choice in response_list:
+                parsed = self.parse_question(choice, num_options)
+                if parsed:
+                    questions.append(parsed)
+                pbar.update(1)
+
         logger.info("Generated %d questions", len(questions))
         return questions
+
 
 if __name__ == "__main__":
     # Example usage

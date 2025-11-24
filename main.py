@@ -1,6 +1,6 @@
 import streamlit as st
 import json
-from question_generator import QuestionGenerator
+from mcq_generator import QuestionGenerator
 from question_translator import QuestionTranslator
 from question_prerequsite import QuestionPrerequisite
 from similar_question_generator import SimilarQuestionGenerator

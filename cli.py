@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import List, Dict
 from datetime import datetime
 import litellm
-from question_generator import QuestionGenerator
+from mcq_generator import QuestionGenerator
+from binary_question_generator import BinaryQuestionGenerator, BinaryQuestionConfig
 from question_translator import QuestionTranslator
 from question_prerequsite import QuestionPrerequisite
 from similar_question_generator import SimilarQuestionGenerator
@@ -78,7 +79,39 @@ class MCQGeneratorCLI:
             logger.error(f"Error generating questions: {e}")
             raise Exception(f"Error generating questions: {e}")
 
-    def display_questions(self, questions: List[Dict], show_answers: bool = False):
+    def generate_binary_questions(self, specialization: str, difficulty: str,
+                                 num_questions: int, question_type: str = "true_false",
+                                 max_tokens: int = 2000) -> List[Dict]:
+        """Generate binary choice questions (True/False or Yes/No)"""
+        if not self.model:
+            raise Exception("Model not initialized. Please set up a model first.")
+
+        try:
+            generator = BinaryQuestionGenerator(self.model)
+            question_type_label = "True/False" if question_type == "true_false" else "Yes/No"
+            print(f"\n📚 Generating {num_questions} {difficulty} {question_type_label} questions on '{specialization}'...")
+
+            config = BinaryQuestionConfig(
+                field=specialization,
+                difficulty=difficulty,
+                num_questions=num_questions,
+                question_type=question_type,
+                max_tokens=max_tokens
+            )
+            questions = generator.generate_questions(config)
+
+            if questions:
+                print(f"✓ Successfully generated {len(questions)} {question_type_label} questions\n")
+                logger.info(f"Generated {len(questions)} {question_type_label} questions for {specialization}")
+                return questions
+            else:
+                raise Exception(f"Failed to generate {question_type_label} questions. Check logs for details.")
+
+        except Exception as e:
+            logger.error(f"Error generating {question_type} questions: {e}")
+            raise Exception(f"Error generating questions: {e}")
+
+    def display_questions(self, questions: List[Dict], show_answers: bool = False, is_binary: bool = False):
         """Display questions in a formatted way"""
         if not questions:
             print("No questions to display.")
@@ -87,19 +120,28 @@ class MCQGeneratorCLI:
         for idx, q in enumerate(questions, 1):
             print(f"Question {idx}:")
             print(f"{q.get('question', 'N/A')}")
-            print(f"\nOptions:")
 
-            options = q.get('options', {})
-            if isinstance(options, dict):
-                for key, option in options.items():
-                    print(f"  {key}. {option}")
+            if is_binary:
+                # For binary questions, show explanation
+                if show_answers:
+                    print(f"\n✓ Answer: {q.get('correct_answer', 'N/A')}")
+                    print(f"\nExplanation: {q.get('explanation', 'N/A')}")
             else:
-                # Handle list format
-                for idx, option in enumerate(options, 1):
-                    print(f"  {chr(64+idx)}. {option}")
+                # For MCQ, show options
+                print(f"\nOptions:")
+                options = q.get('options', {})
+                if isinstance(options, dict):
+                    for key, option in options.items():
+                        print(f"  {key}. {option}")
+                else:
+                    # Handle list format
+                    for i, option in enumerate(options, 1):
+                        print(f"  {chr(64+i)}. {option}")
 
-            if show_answers:
-                print(f"\n✓ Correct Answer: {q.get('correct_answer', 'N/A')}")
+                if show_answers:
+                    print(f"\n✓ Correct Answer: {q.get('correct_answer', 'N/A')}")
+
+            print()  # Blank line between questions
 
     def save_questions(self, questions: List[Dict], specialization: str,
                       filename: str = None):
@@ -350,6 +392,23 @@ def cmd_similar(args, cli_app):
         sys.exit(1)
 
 
+def cmd_generate_binary(args, cli_app):
+    """Generate binary choice questions (True/False or Yes/No)"""
+    try:
+        questions = cli_app.generate_binary_questions(
+            args.specialization, args.difficulty.capitalize(), args.count,
+            args.question_type, args.max_tokens
+        )
+        cli_app.display_questions(questions, show_answers=args.show_answers, is_binary=True)
+
+        if args.save:
+            cli_app.save_questions(questions, args.specialization, args.save)
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_info(args, cli_app):
     """Display MCQ Generator CLI information"""
     info_text = """
@@ -365,25 +424,34 @@ QUICK START:
      $ python cli.py init-model
      or: python cli.py init-model --provider openai --model gpt-4o-mini
 
-  2. Generate questions:
+  2. Generate MCQ questions:
      $ python cli.py generate --specialization "Python Programming" \\
        --difficulty medium --count 5
 
-  3. Load and view questions:
+  3. Generate True/False questions:
+     $ python cli.py generate-binary --specialization "Biology" \\
+       --question-type true_false --difficulty easy --count 5
+
+  4. Generate Yes/No questions:
+     $ python cli.py generate-binary --specialization "History" \\
+       --question-type yes_no --difficulty medium --count 3
+
+  5. Load and view questions:
      $ python cli.py load questions.json --show-answers
 
-  4. Get explanations:
+  6. Get explanations:
      $ python cli.py explain questions.json --question-num 1
 
 AVAILABLE COMMANDS:
-  • init-model      Initialize the AI model
-  • generate        Generate MCQ questions
-  • load            Load questions from file
-  • explain         Get explanation for a question
-  • translate       Translate questions to another language
-  • prerequisites   Get prerequisite knowledge
-  • similar         Generate similar question
-  • info            Show this information
+  • init-model       Initialize the AI model
+  • generate         Generate MCQ questions
+  • generate-binary  Generate True/False or Yes/No questions
+  • load             Load questions from file
+  • explain          Get explanation for a question
+  • translate        Translate questions to another language
+  • prerequisites    Get prerequisite knowledge
+  • similar          Generate similar question
+  • info             Show this information
 
 For more help: python cli.py COMMAND --help
     """
@@ -433,17 +501,47 @@ Examples:
                            type=int,
                            default=5,
                            help='Number of questions to generate (default: 5)')
-    gen_parser.add_argument('--max-tokens',
+    gen_parser.add_argument('--max-tokens', '-m',
                            type=int,
                            default=3000,
                            help='Maximum tokens for generation (default: 3000)')
-    gen_parser.add_argument('--save',
+    gen_parser.add_argument('--save', '-o',
                            type=str,
                            help='Save questions to JSON file')
-    gen_parser.add_argument('--show-answers',
+    gen_parser.add_argument('--show-answers', '-a',
                            action='store_true',
                            help='Display correct answers')
     gen_parser.set_defaults(func=cmd_generate)
+
+    # generate-binary command
+    binary_parser = subparsers.add_parser('generate-binary', help='Generate True/False or Yes/No questions')
+    binary_parser.add_argument('--specialization', '-s',
+                              type=str,
+                              required=True,
+                              help='Topic or subject for question generation')
+    binary_parser.add_argument('--question-type', '-t',
+                              choices=['true_false', 'yes_no'],
+                              default='true_false',
+                              help='Type of binary question (default: true_false)')
+    binary_parser.add_argument('--difficulty', '-d',
+                              choices=['easy', 'medium', 'hard'],
+                              default='medium',
+                              help='Difficulty level (default: medium)')
+    binary_parser.add_argument('--count', '-c',
+                              type=int,
+                              default=5,
+                              help='Number of questions to generate (default: 5)')
+    binary_parser.add_argument('--max-tokens', '-m',
+                              type=int,
+                              default=2000,
+                              help='Maximum tokens for generation (default: 2000)')
+    binary_parser.add_argument('--save', '-o',
+                              type=str,
+                              help='Save questions to JSON file')
+    binary_parser.add_argument('--show-answers', '-a',
+                              action='store_true',
+                              help='Display correct answers and explanations')
+    binary_parser.set_defaults(func=cmd_generate_binary)
 
     # load command
     load_parser = subparsers.add_parser('load', help='Load questions from file')

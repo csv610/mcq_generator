@@ -1,0 +1,20 @@
+{
+  "metadata": {
+    "field": "Biology",
+    "question_type": "true_false",
+    "count": 2,
+    "generated_at": "2025-11-24T15:45:54.781614"
+  },
+  "questions": [
+    {
+      "question": "All living organisms are made up of one or more cells.",
+      "correct_answer": "True",
+      "explanation": "The cell is the basic structural and functional unit of life. All living organisms, whether simple (like bacteria) or complex (like humans), are composed of cells. This principle is known as the cell theory, which states that all living things are made of cells, cells are the basic units of structure and function, and all cells come from pre-existing cells."
+    },
+    {
+      "question": "Plants make their own food using sunlight, carbon dioxide, and water.",
+      "correct_answer": "True",
+      "explanation": "Plants are autotrophs, meaning they produce their own food through a process called photosynthesis. During photosynthesis, plants use sunlight as an energy source to convert carbon dioxide from the air and water from the soil into glucose (a type of sugar) and oxygen. This process occurs mainly in the leaves and is essential for the survival of plants and many other organisms."
+    }
+  ]
+}

@@ -4,7 +4,7 @@ Unit tests for MCQ Generator modules
 
 import unittest
 from prompt_builder import PromptBuilder
-from question_generator import QuestionGenerator
+from mcq_generator import QuestionGenerator
 
 
 class TestPromptBuilder(unittest.TestCase):

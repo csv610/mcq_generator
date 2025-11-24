@@ -192,49 +192,61 @@ Each question should be solvable independently and represent diverse aspects of 
 
         return new_prompt
     
-    def get_true_false_question_generation_prompt(self, statement: str, num_questions: int = 1) -> str:
+    def get_true_false_question_generation_prompt(self, field: str, num_questions: int = 1, difficulty: str = "Medium") -> str:
         """Generate a prompt for creating True/False questions.
 
         Args:
-            statement: The statement to base True/False questions on
+            field: Subject field for question generation
             num_questions: Number of questions to generate (default: 1)
+            difficulty: Difficulty level (Easy, Medium, Hard) (default: Medium)
 
         Returns:
             Formatted prompt string for LLM consumption
         """
-        new_prompt = f"""Generate {num_questions} unique, unambiguous, and unbiased True/False questions based on the following statement.
-        Each question should clearly indicate whether the statement is true or false, and provide a brief explanation for the answer.
+        new_prompt = f"""Generate {num_questions} unique, unambiguous, and unbiased True/False questions about {field} at a {difficulty} difficulty level.
+Each question should clearly indicate whether the statement is true or false, and provide a detailed explanation for the answer.
 
-        Statement: {statement}
+QUALITY REQUIREMENTS:
+- Cover a wide range of subtopics within {field}
+- Use clear language with no room for misinterpretation
+- Ensure no cultural, racial, or gender bias
+- Each question must be unique (no duplicates)
+- Match the difficulty level: Easy (recall), Medium (understanding), Hard (critical thinking)
 
-        Format the output strictly as follows:
+Format the output strictly as follows:
 
-        Question: [Is the statement true or false?]
-        Answer: [True/False]
-        Explanation: [Brief explanation of the answer]"""
+Question: [True/False statement]
+Answer: [True/False]
+Explanation: [Detailed explanation of why the answer is correct]"""
 
         return new_prompt
     
-    def get_yes_no_question_generation_prompt(self, statement: str, num_questions: int = 1) -> str:
+    def get_yes_no_question_generation_prompt(self, field: str, num_questions: int = 1, difficulty: str = "Medium") -> str:
         """Generate a prompt for creating Yes/No questions.
 
         Args:
-            statement: The statement to base Yes/No questions on
+            field: Subject field for question generation
             num_questions: Number of questions to generate (default: 1)
+            difficulty: Difficulty level (Easy, Medium, Hard) (default: Medium)
 
         Returns:
             Formatted prompt string for LLM consumption
         """
-        new_prompt = f"""Generate {num_questions} unique, unambiguous, and unbiased Yes/No questions based on the following statement.
-        Each question should clearly indicate whether the answer is yes or no, and provide a brief explanation for the answer.
+        new_prompt = f"""Generate {num_questions} unique, unambiguous, and unbiased Yes/No questions about {field} at a {difficulty} difficulty level.
+Each question should clearly indicate whether the answer is yes or no, and provide a detailed explanation for the answer.
 
-        Statement: {statement}
+QUALITY REQUIREMENTS:
+- Cover a wide range of subtopics within {field}
+- Use clear language with no room for misinterpretation
+- Ensure no cultural, racial, or gender bias
+- Each question must be unique (no duplicates)
+- Match the difficulty level: Easy (recall), Medium (understanding), Hard (critical thinking)
 
-        Format the output strictly as follows:
+Format the output strictly as follows:
 
-        Question: [Is the statement true or false?]
-        Answer: [Yes/No]
-        Explanation: [Brief explanation of the answer]"""
+Question: [Yes/No question]
+Answer: [Yes/No]
+Explanation: [Detailed explanation of why the answer is correct]"""
 
         return new_prompt
     
