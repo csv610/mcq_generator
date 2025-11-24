@@ -1,10 +1,16 @@
 import streamlit as st
 import json
-from mcq_generator import QuestionGenerator
-from question_translator import QuestionTranslator
-from question_prerequsite import QuestionPrerequisite
-from similar_question_generator import SimilarQuestionGenerator
-from prompt_builder import PromptBuilder
+import sys
+from pathlib import Path
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+
+from mcq_generator.mcq_generator import QuestionGenerator
+from mcq_generator.question_translator import QuestionTranslator
+from mcq_generator.question_prerequsite import QuestionPrerequisite
+from mcq_generator.similar_question_generator import SimilarQuestionGenerator
+from mcq_generator.prompt_builder import PromptBuilder
 import logging
 
 # Initialize logging
