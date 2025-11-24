@@ -1,562 +1,268 @@
 """
-Unit tests for MCQ Generator module
-Tests QuestionConfig dataclass and MCQGenerator class
+Unit tests for MCQ Generator modules
 """
 
 import unittest
-import tempfile
-import json
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import sys
-
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from mcq_generator import MCQGenerator, QuestionConfig
+from prompt_builder import PromptBuilder
+from mcq_generator import QuestionGenerator
 
 
-class TestQuestionConfig(unittest.TestCase):
-    """Test QuestionConfig dataclass"""
-
-    def test_config_with_required_fields_only(self):
-        """Test QuestionConfig creation with only required fields"""
-        config = QuestionConfig(
-            field="Physics",
-            difficulty="Medium",
-            num_questions=5,
-            num_options=4
-        )
-
-        self.assertEqual(config.field, "Physics")
-        self.assertEqual(config.difficulty, "Medium")
-        self.assertEqual(config.num_questions, 5)
-        self.assertEqual(config.num_options, 4)
-        self.assertEqual(config.num_correct_answers, 1)
-        self.assertEqual(config.max_tokens, 3000)
-        self.assertIsNone(config.subfield)
-
-    def test_config_with_all_fields(self):
-        """Test QuestionConfig with all fields specified"""
-        config = QuestionConfig(
-            field="Chemistry",
-            difficulty="Hard",
-            num_questions=10,
-            num_options=5,
-            num_correct_answers=2,
-            max_tokens=4000,
-            subfield="Quantum Chemistry"
-        )
-
-        self.assertEqual(config.field, "Chemistry")
-        self.assertEqual(config.difficulty, "Hard")
-        self.assertEqual(config.num_questions, 10)
-        self.assertEqual(config.num_options, 5)
-        self.assertEqual(config.num_correct_answers, 2)
-        self.assertEqual(config.max_tokens, 4000)
-        self.assertEqual(config.subfield, "Quantum Chemistry")
-
-    def test_config_defaults(self):
-        """Test default values in QuestionConfig"""
-        config = QuestionConfig(
-            field="Biology",
-            difficulty="Easy",
-            num_questions=3,
-            num_options=4
-        )
-
-        self.assertEqual(config.num_correct_answers, 1)
-        self.assertEqual(config.max_tokens, 3000)
-        self.assertIsNone(config.subfield)
-
-    def test_config_zero_correct_answers(self):
-        """Test QuestionConfig with zero correct answers"""
-        config = QuestionConfig(
-            field="History",
-            difficulty="Medium",
-            num_questions=5,
-            num_options=4,
-            num_correct_answers=0
-        )
-
-        self.assertEqual(config.num_correct_answers, 0)
-
-    def test_config_multiple_correct_answers(self):
-        """Test QuestionConfig with multiple correct answers"""
-        config = QuestionConfig(
-            field="Math",
-            difficulty="Hard",
-            num_questions=8,
-            num_options=6,
-            num_correct_answers=3
-        )
-
-        self.assertEqual(config.num_correct_answers, 3)
-
-
-class TestMCQGeneratorInit(unittest.TestCase):
-    """Test MCQGenerator initialization"""
-
-    def test_init_with_valid_model(self):
-        """Test MCQGenerator initialization with valid model"""
-        generator = MCQGenerator("openai/gpt-4o-mini")
-
-        self.assertEqual(generator.model, "openai/gpt-4o-mini")
-        self.assertIsNotNone(generator.generator)
-
-    def test_init_with_claude_model(self):
-        """Test MCQGenerator initialization with Claude model"""
-        generator = MCQGenerator("claude/claude-3-opus")
-
-        self.assertEqual(generator.model, "claude/claude-3-opus")
-
-    def test_init_with_perplexity_model(self):
-        """Test MCQGenerator initialization with Perplexity model"""
-        generator = MCQGenerator("perplexity/sonar")
-
-        self.assertEqual(generator.model, "perplexity/sonar")
-
-
-class TestMCQGeneratorValidation(unittest.TestCase):
-    """Test MCQGenerator parameter validation"""
+class TestPromptBuilder(unittest.TestCase):
+    """Test PromptBuilder class"""
 
     def setUp(self):
-        """Set up test fixtures"""
-        self.generator = MCQGenerator("openai/gpt-4o-mini")
-
-    def test_validate_params_valid_single_answer(self):
-        """Test _validate_params with valid single answer"""
-        # Should not raise any exception
-        self.generator._validate_params(num_options=4, num_correct_answers=1)
-
-    def test_validate_params_valid_multiple_answers(self):
-        """Test _validate_params with valid multiple answers"""
-        # Should not raise any exception
-        self.generator._validate_params(num_options=4, num_correct_answers=2)
-
-    def test_validate_params_valid_zero_answers(self):
-        """Test _validate_params with zero answers (None of the Above)"""
-        # Should not raise any exception
-        self.generator._validate_params(num_options=4, num_correct_answers=0)
-
-    def test_validate_params_minimum_options(self):
-        """Test _validate_params with minimum valid options"""
-        # Should not raise any exception
-        self.generator._validate_params(num_options=2, num_correct_answers=1)
-
-    def test_validate_params_insufficient_options(self):
-        """Test _validate_params with insufficient options"""
-        with self.assertRaises(ValueError) as context:
-            self.generator._validate_params(num_options=1, num_correct_answers=1)
-
-        self.assertIn("Number of options must be > 1", str(context.exception))
-
-    def test_validate_params_negative_correct_answers(self):
-        """Test _validate_params with negative correct answers"""
-        with self.assertRaises(ValueError) as context:
-            self.generator._validate_params(num_options=4, num_correct_answers=-1)
-
-        self.assertIn("Number of correct answers must be >= 0", str(context.exception))
-
-    def test_validate_params_negative_options(self):
-        """Test _validate_params with negative options"""
-        with self.assertRaises(ValueError) as context:
-            self.generator._validate_params(num_options=-1, num_correct_answers=1)
-
-        self.assertIn("Number of options must be > 1", str(context.exception))
-
-
-class TestMCQGeneratorSaveQuestions(unittest.TestCase):
-    """Test MCQGenerator question saving functionality"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.generator = MCQGenerator("openai/gpt-4o-mini")
-        self.sample_questions = [
-            {
-                "question": "What is 2+2?",
-                "options": {"A": "3", "B": "4", "C": "5", "D": "6"},
-                "correct_answer": ["B"]
-            },
-            {
-                "question": "What is the capital of France?",
-                "options": {"A": "London", "B": "Paris", "C": "Berlin", "D": "Madrid"},
-                "correct_answer": ["B"]
-            }
-        ]
-
-    def test_save_questions_with_custom_filename(self):
-        """Test _save_questions with custom filename"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            import os
-            original_dir = os.getcwd()
-            try:
-                os.chdir(tmpdir)
-                filepath = self.generator._save_questions(
-                    self.sample_questions,
-                    "Math",
-                    filename="custom_questions.json",
-                    subfield=None
-                )
-
-                self.assertEqual(filepath, "custom_questions.json")
-                self.assertTrue(Path(filepath).exists())
-
-                # Verify file contents
-                with open(filepath) as f:
-                    data = json.load(f)
-
-                self.assertEqual(data["field"], "Math")
-                self.assertEqual(data["question_count"], 2)
-                self.assertEqual(len(data["questions"]), 2)
-                self.assertIsNone(data["subfield"])
-            finally:
-                os.chdir(original_dir)
-
-    def test_save_questions_with_subfield(self):
-        """Test _save_questions with subfield"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            import os
-            original_dir = os.getcwd()
-            try:
-                os.chdir(tmpdir)
-                filepath = self.generator._save_questions(
-                    self.sample_questions,
-                    "Physics",
-                    filename="physics_quantum.json",
-                    subfield="Quantum Mechanics"
-                )
-
-                with open(filepath) as f:
-                    data = json.load(f)
-
-                self.assertEqual(data["field"], "Physics")
-                self.assertEqual(data["subfield"], "Quantum Mechanics")
-            finally:
-                os.chdir(original_dir)
-
-    def test_save_questions_auto_filename(self):
-        """Test _save_questions with auto-generated filename"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            import os
-            original_dir = os.getcwd()
-            try:
-                os.chdir(tmpdir)
-                filepath = self.generator._save_questions(
-                    self.sample_questions,
-                    "Chemistry",
-                    filename=None,
-                    subfield="Organic"
-                )
-
-                self.assertTrue(Path(filepath).exists())
-                self.assertIn("mcq_Chemistry_Organic", filepath)
-                self.assertTrue(filepath.endswith(".json"))
-            finally:
-                os.chdir(original_dir)
-
-    def test_save_questions_single_question(self):
-        """Test _save_questions with single question"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            import os
-            original_dir = os.getcwd()
-            try:
-                os.chdir(tmpdir)
-                single_question = [self.sample_questions[0]]
-                filepath = self.generator._save_questions(
-                    single_question,
-                    "Math",
-                    filename="single.json"
-                )
-
-                with open(filepath) as f:
-                    data = json.load(f)
-
-                self.assertEqual(data["question_count"], 1)
-                self.assertEqual(len(data["questions"]), 1)
-            finally:
-                os.chdir(original_dir)
-
-    def test_save_questions_empty_list_raises_error(self):
-        """Test _save_questions with empty list raises ValueError"""
-        with self.assertRaises(ValueError) as context:
-            self.generator._save_questions([], "Math", filename="test.json")
-
-        self.assertIn("Cannot save: questions list is empty", str(context.exception))
-
-    def test_save_questions_has_metadata(self):
-        """Test saved questions include required metadata"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            import os
-            original_dir = os.getcwd()
-            try:
-                os.chdir(tmpdir)
-                filepath = self.generator._save_questions(
-                    self.sample_questions,
-                    "Biology",
-                    filename="bio.json"
-                )
-
-                with open(filepath) as f:
-                    data = json.load(f)
-
-                self.assertIn("field", data)
-                self.assertIn("subfield", data)
-                self.assertIn("generated_at", data)
-                self.assertIn("question_count", data)
-                self.assertIn("questions", data)
-            finally:
-                os.chdir(original_dir)
-
-
-class TestMCQGeneratorLoadQuestions(unittest.TestCase):
-    """Test MCQGenerator question loading functionality"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.generator = MCQGenerator("openai/gpt-4o-mini")
-        self.sample_data = {
-            "field": "Physics",
-            "subfield": "Mechanics",
-            "generated_at": "2024-11-24T10:00:00",
-            "question_count": 2,
-            "questions": [
-                {
-                    "question": "What is Newton's first law?",
-                    "options": {"A": "F=ma", "B": "Action-reaction", "C": "Inertia", "D": "Work"},
-                    "correct_answer": ["C"]
-                },
-                {
-                    "question": "Define velocity",
-                    "options": {"A": "Speed", "B": "Rate of change of position", "C": "Acceleration", "D": "Force"},
-                    "correct_answer": ["B"]
-                }
-            ]
-        }
-
-    def test_load_questions_valid_file(self):
-        """Test load_questions with valid JSON file"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_file = Path(tmpdir) / "physics.json"
-            with open(test_file, 'w') as f:
-                json.dump(self.sample_data, f)
-
-            questions = self.generator.load_questions(str(test_file))
-
-            self.assertEqual(len(questions), 2)
-            self.assertEqual(questions[0]["question"], "What is Newton's first law?")
-            self.assertEqual(questions[1]["question"], "Define velocity")
-
-    def test_load_questions_single_question(self):
-        """Test load_questions with single question file"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            data = self.sample_data.copy()
-            data["questions"] = [self.sample_data["questions"][0]]
-            data["question_count"] = 1
-
-            test_file = Path(tmpdir) / "single.json"
-            with open(test_file, 'w') as f:
-                json.dump(data, f)
-
-            questions = self.generator.load_questions(str(test_file))
-
-            self.assertEqual(len(questions), 1)
-            self.assertEqual(questions[0]["question"], "What is Newton's first law?")
-
-    def test_load_questions_preserves_structure(self):
-        """Test load_questions preserves question structure"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_file = Path(tmpdir) / "physics.json"
-            with open(test_file, 'w') as f:
-                json.dump(self.sample_data, f)
-
-            questions = self.generator.load_questions(str(test_file))
-
-            for q in questions:
-                self.assertIn("question", q)
-                self.assertIn("options", q)
-                self.assertIn("correct_answer", q)
-
-    def test_load_questions_file_not_found(self):
-        """Test load_questions with non-existent file"""
-        with self.assertRaises(FileNotFoundError) as context:
-            self.generator.load_questions("/nonexistent/path/questions.json")
-
-        self.assertIn("Questions file not found", str(context.exception))
-
-    def test_load_questions_invalid_json(self):
-        """Test load_questions with invalid JSON"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_file = Path(tmpdir) / "invalid.json"
-            with open(test_file, 'w') as f:
-                f.write("{ invalid json content ]")
-
-            with self.assertRaises(ValueError) as context:
-                self.generator.load_questions(str(test_file))
-
-            self.assertIn("Invalid JSON", str(context.exception))
-
-    def test_load_questions_empty_questions_list(self):
-        """Test load_questions with empty questions list"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            data = self.sample_data.copy()
-            data["questions"] = []
-            data["question_count"] = 0
-
-            test_file = Path(tmpdir) / "empty.json"
-            with open(test_file, 'w') as f:
-                json.dump(data, f)
-
-            questions = self.generator.load_questions(str(test_file))
-
-            self.assertEqual(len(questions), 0)
-            self.assertIsInstance(questions, list)
-
-
-class TestMCQGeneratorDisplay(unittest.TestCase):
-    """Test MCQGenerator display functionality"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.generator = MCQGenerator("openai/gpt-4o-mini")
-        self.sample_questions = [
-            {
-                "question": "What is 2+2?",
-                "options": {"A": "3", "B": "4", "C": "5", "D": "6"},
-                "correct_answer": ["B"]
-            }
-        ]
-
-    def test_display_questions_empty_list(self):
-        """Test display_questions with empty list"""
-        # Should not raise and print "No questions to display"
-        self.generator.display_questions([])
-
-    def test_display_questions_single_question(self):
-        """Test display_questions with single question"""
-        # Should not raise
-        self.generator.display_questions(self.sample_questions)
-
-    def test_display_questions_multiple_questions(self):
-        """Test display_questions with multiple questions"""
-        questions = self.sample_questions * 3
-        # Should not raise
-        self.generator.display_questions(questions)
-
-    def test_print_answer_string(self):
-        """Test _print_answer with string answer"""
-        # Should not raise
-        self.generator._print_answer("A")
-
-    def test_print_answer_list(self):
-        """Test _print_answer with list of answers"""
-        # Should not raise
-        self.generator._print_answer(["A", "B", "C"])
-
-    def test_print_answer_single_element_list(self):
-        """Test _print_answer with single element list"""
-        # Should not raise
-        self.generator._print_answer(["A"])
-
-    def test_print_options_dict(self):
-        """Test _print_options with dictionary"""
-        options = {"A": "Option A", "B": "Option B", "C": "Option C"}
-        # Should not raise
-        self.generator._print_options(options)
-
-    def test_print_options_list(self):
-        """Test _print_options with list"""
-        options = ["Option A", "Option B", "Option C"]
-        # Should not raise
-        self.generator._print_options(options)
-
-
-class TestMCQGeneratorGenerate(unittest.TestCase):
-    """Test MCQGenerator generate functionality"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.generator = MCQGenerator("openai/gpt-4o-mini")
-        self.sample_questions = [
-            {
-                "question": "Test question?",
-                "options": {"A": "a", "B": "b"},
-                "correct_answer": ["A"]
-            }
-        ]
-
-    @patch('mcq_generator.MCQGenerator._save_questions')
-    def test_generate_returns_filepath(self, mock_save):
-        """Test generate method returns filepath"""
-        mock_save.return_value = "test.json"
-
-        with patch.object(self.generator.generator, 'generate_questions', return_value=self.sample_questions):
-            config = QuestionConfig(
-                field="Test",
-                difficulty="Easy",
-                num_questions=1,
-                num_options=2
+        self.builder = PromptBuilder()
+
+    def test_mcq_generation_prompt_single_answer(self):
+        """Test MCQ prompt generation with single correct answer"""
+        prompt = self.builder.get_mcq_generation_prompt(
+            "Physics", "Medium", 2, 4, num_correct_answers=1
+        )
+        self.assertIn("Physics", prompt)
+        self.assertIn("Medium", prompt)
+        self.assertIn("with only one correct answer", prompt)
+        self.assertIn("A. [Option A]", prompt)
+        self.assertIn("B. [Option B]", prompt)
+        self.assertIn("C. [Option C]", prompt)
+        self.assertIn("D. [Option D]", prompt)
+
+    def test_mcq_generation_prompt_multiple_answers(self):
+        """Test MCQ prompt generation with multiple correct answers"""
+        prompt = self.builder.get_mcq_generation_prompt(
+            "Chemistry", "Hard", 3, 5, num_correct_answers=2
+        )
+        self.assertIn("Chemistry", prompt)
+        self.assertIn("Hard", prompt)
+        self.assertIn("with 2 correct answer(s)", prompt)
+        self.assertIn("A. [Option A]", prompt)
+        self.assertIn("E. [Option E]", prompt)
+
+    def test_mcq_generation_prompt_dynamic_options(self):
+        """Test dynamic option generation for different option counts"""
+        for num_opts in [2, 3, 4, 5, 6]:
+            prompt = self.builder.get_mcq_generation_prompt(
+                "History", "Easy", 1, num_opts
             )
+            # Verify correct number of options generated
+            expected_letters = [chr(65 + i) for i in range(num_opts)]
+            for letter in expected_letters:
+                self.assertIn(f"{letter}. [Option {letter}]", prompt)
 
-            result = self.generator.generate(config, filename="test.json")
+    def test_text_translation_prompt(self):
+        """Test translation prompt generation"""
+        prompt = self.builder.get_text_translation_prompt(
+            "Hello World", "French"
+        )
+        self.assertIn("Hello World", prompt)
+        self.assertIn("French", prompt)
+        self.assertIn("Translate", prompt)
 
-            self.assertEqual(result, "test.json")
-            mock_save.assert_called_once()
+    def test_explain_answer_prompt_with_options(self):
+        """Test explanation prompt with options"""
+        prompt = self.builder.get_explain_answer_prompt(
+            "What is X?", ["Option A", "Option B"], "A"
+        )
+        self.assertIn("What is X?", prompt)
+        self.assertIn("A", prompt)
+        self.assertIn("Explain", prompt)
 
-    @patch('mcq_generator.MCQGenerator._save_questions')
-    def test_generate_calls_llm(self, mock_save):
-        """Test generate method calls LLM"""
-        mock_save.return_value = "test.json"
+    def test_prerequisites_prompt(self):
+        """Test prerequisites prompt generation"""
+        prompt = self.builder.get_prerequisites_prompt(
+            "Newton's Laws", None
+        )
+        self.assertIn("Newton's Laws", prompt)
+        self.assertIn("background material", prompt)
 
-        with patch.object(self.generator.generator, 'generate_questions', return_value=self.sample_questions) as mock_gen_questions:
-            config = QuestionConfig(
-                field="Physics",
-                difficulty="Medium",
-                num_questions=5,
-                num_options=4
-            )
+    def test_similar_question_prompt(self):
+        """Test similar question generation prompt"""
+        prompt = self.builder.get_similar_question_generation_prompt(
+            "What is gravity?", num_questions=2, with_options=True
+        )
+        self.assertIn("What is gravity?", prompt)
+        self.assertIn("2", prompt)
 
-            self.generator.generate(config)
+    def test_true_false_prompt(self):
+        """Test True/False question prompt"""
+        prompt = self.builder.get_true_false_question_generation_prompt(
+            "Earth is flat", num_questions=1
+        )
+        self.assertIn("Earth is flat", prompt)
+        self.assertIn("True/False", prompt)
 
-            mock_gen_questions.assert_called_once()
-            args, kwargs = mock_gen_questions.call_args
-            self.assertEqual(args[0], "Physics")
-            self.assertEqual(args[1], "Medium")
-            self.assertEqual(args[2], 5)
+    def test_yes_no_prompt(self):
+        """Test Yes/No question prompt"""
+        prompt = self.builder.get_yes_no_question_generation_prompt(
+            "Do plants need water?", num_questions=1
+        )
+        self.assertIn("Do plants need water?", prompt)
+        self.assertIn("Yes/No", prompt)
 
-    @patch('mcq_generator.MCQGenerator._save_questions')
-    def test_generate_empty_questions_raises_error(self, mock_save):
-        """Test generate raises error when no questions generated"""
-        with patch.object(self.generator.generator, 'generate_questions', return_value=[]):
-            config = QuestionConfig(
-                field="Test",
-                difficulty="Easy",
-                num_questions=1,
-                num_options=2
-            )
+    def test_mcq_generation_prompt_zero_answers(self):
+        """Test MCQ prompt with 0 correct answers (None of the Above)"""
+        prompt = self.builder.get_mcq_generation_prompt(
+            "Biology", "Easy", 1, 4, num_correct_answers=0
+        )
+        self.assertIn("'None of the Above' as the only correct answer", prompt)
+        self.assertIn("None of the Above", prompt)
 
-            with self.assertRaises(RuntimeError) as context:
-                self.generator.generate(config)
+    def test_mcq_generation_prompt_all_answers(self):
+        """Test MCQ prompt with all options as correct (All of the Above)"""
+        prompt = self.builder.get_mcq_generation_prompt(
+            "Chemistry", "Medium", 1, 4, num_correct_answers=4
+        )
+        self.assertIn("'All of the Above' as the only correct answer", prompt)
+        self.assertIn("All of the Above", prompt)
 
-            self.assertIn("Failed to create questions", str(context.exception))
 
-    @patch('mcq_generator.MCQGenerator._save_questions')
-    def test_generate_with_custom_filename(self, mock_save):
-        """Test generate with custom filename"""
-        mock_save.return_value = "custom.json"
+class TestQuestionGenerator(unittest.TestCase):
+    """Test QuestionGenerator class"""
 
-        with patch.object(self.generator.generator, 'generate_questions', return_value=self.sample_questions):
-            config = QuestionConfig(
-                field="Test",
-                difficulty="Easy",
-                num_questions=1,
-                num_options=2
-            )
+    def setUp(self):
+        self.generator = QuestionGenerator("openai/gpt-4o-mini")
 
-            result = self.generator.generate(config, filename="custom.json")
+    def test_parse_correct_answers_single(self):
+        """Test parsing single correct answer"""
+        result = self.generator._parse_correct_answers("A")
+        self.assertEqual(result, ["A"])
 
-            self.assertEqual(result, "custom.json")
-            mock_save.assert_called_once()
+    def test_parse_correct_answers_multiple_comma(self):
+        """Test parsing multiple answers separated by commas"""
+        result = self.generator._parse_correct_answers("A, B, C")
+        self.assertEqual(result, ["A", "B", "C"])
+
+    def test_parse_correct_answers_multiple_and(self):
+        """Test parsing multiple answers separated by 'and'"""
+        result = self.generator._parse_correct_answers("A and B")
+        self.assertEqual(result, ["A", "B"])
+
+    def test_parse_correct_answers_all_of_above(self):
+        """Test parsing 'All of the Above'"""
+        result = self.generator._parse_correct_answers("All of the Above")
+        self.assertEqual(result, ["All of the Above"])
+
+    def test_parse_correct_answers_none_of_above(self):
+        """Test parsing 'None of the Above'"""
+        result = self.generator._parse_correct_answers("None of the Above")
+        self.assertEqual(result, ["None of the Above"])
+
+    def test_parse_correct_answers_case_insensitive(self):
+        """Test case insensitivity"""
+        result1 = self.generator._parse_correct_answers("all of the above")
+        result2 = self.generator._parse_correct_answers("NONE OF THE ABOVE")
+        self.assertEqual(result1, ["All of the Above"])
+        self.assertEqual(result2, ["None of the Above"])
+
+    def test_parse_question_basic(self):
+        """Test basic question parsing"""
+        response = """Question: What is 2 + 2?
+A. 3
+B. 4
+C. 5
+D. 6
+Correct Answer: B"""
+        result = self.generator.parse_question(response, 4)
+        self.assertEqual(result["question"], "What is 2 + 2?")
+        self.assertEqual(result["options"]["A"], "3")
+        self.assertEqual(result["options"]["B"], "4")
+        self.assertEqual(result["options"]["C"], "5")
+        self.assertEqual(result["options"]["D"], "6")
+        self.assertEqual(result["correct_answer"], ["B"])
+
+    def test_parse_question_multiple_answers(self):
+        """Test parsing question with multiple correct answers"""
+        response = """Question: Which are prime numbers?
+A. 2
+B. 3
+C. 4
+D. 5
+Correct Answer: A, B, D"""
+        result = self.generator.parse_question(response, 4)
+        self.assertEqual(result["question"], "Which are prime numbers?")
+        self.assertEqual(result["correct_answer"], ["A", "B", "D"])
+
+    def test_parse_question_empty_response(self):
+        """Test parsing returns empty dict for invalid response"""
+        response = "This is not a valid question format"
+        result = self.generator.parse_question(response, 4)
+        self.assertEqual(result, {})
+
+    def test_parse_question_five_options(self):
+        """Test parsing with 5 options"""
+        response = """Question: What is the capital of France?
+A. London
+B. Berlin
+C. Paris
+D. Madrid
+E. Rome
+Correct Answer: C"""
+        result = self.generator.parse_question(response, 5)
+        self.assertIn("E", result["options"])
+        self.assertEqual(result["options"]["E"], "Rome")
+
+    def test_question_generator_initialization(self):
+        """Test QuestionGenerator initialization"""
+        gen = QuestionGenerator("claude/claude-3-opus")
+        self.assertEqual(gen.model, "claude/claude-3-opus")
+        self.assertIsNotNone(gen.prompt_builder)
+
+
+class TestMCQGenerationEngine(unittest.TestCase):
+    """Test MCQGenerationEngine class"""
+
+    def setUp(self):
+        from mcq_generate_cli import MCQGenerationEngine
+        self.engine = MCQGenerationEngine("openai/gpt-4o-mini")
+
+    def test_validate_params_valid(self):
+        """Test parameter validation with valid inputs"""
+        # Should not raise
+        self.engine._validate_params(4, 1)
+        self.engine._validate_params(5, 2)
+
+    def test_validate_params_invalid_options(self):
+        """Test parameter validation with invalid option count"""
+        with self.assertRaises(ValueError) as context:
+            self.engine._validate_params(1, 1)
+        self.assertIn("options must be > 1", str(context.exception))
+
+    def test_validate_params_valid_zero_correct_answers(self):
+        """Test parameter validation allows 0 correct answers (None of the Above)"""
+        # Should not raise - 0 is valid for "None of the Above"
+        self.engine._validate_params(4, 0)
+
+    def test_validate_params_invalid_negative_correct_answers(self):
+        """Test parameter validation with negative correct answer count"""
+        with self.assertRaises(ValueError) as context:
+            self.engine._validate_params(4, -1)
+        self.assertIn("correct answers must be >= 0", str(context.exception))
+
+    def test_display_questions_empty(self):
+        """Test displaying empty question list"""
+        import io
+        import sys
+        captured_output = io.StringIO()
+        sys.stdout = captured_output
+        self.engine.display_questions([])
+        sys.stdout = sys.__stdout__
+        self.assertIn("No questions to display", captured_output.getvalue())
+
+    def test_display_questions_with_data(self):
+        """Test displaying questions with data"""
+        import io
+        import sys
+        questions = [{
+            "question": "What is 2+2?",
+            "options": {"A": "3", "B": "4", "C": "5", "D": "6"},
+            "correct_answer": ["B"]
+        }]
+        captured_output = io.StringIO()
+        sys.stdout = captured_output
+        self.engine.display_questions(questions)
+        sys.stdout = sys.__stdout__
+        output = captured_output.getvalue()
+        self.assertIn("What is 2+2?", output)
+        self.assertIn("Answer: B", output)
 
 
 if __name__ == '__main__':
